@@ -127,17 +127,18 @@ def scrape(func):
 
         item = args['item']
 
-        patron = args['patron'] if 'patron' in args else ''
-        listGroups = args['listGroups'] if 'listGroups' in args else []
-        headers = args['headers'] if 'headers' in args else ''
+        action = args['action'] if 'action' in args else 'findvideos'
+        anime = args['anime'] if 'anime' in args else ''
+        addVideolibrary = args['addVideolibrary'] if 'addVideolibrary' in args else True
         blacklist = args['blacklist'] if 'blacklist' in args else ''
         data = args['data'] if 'data' in args else ''
-        patron_block = args['patron_block'] if 'patron_block' in args else ''
+        headers = args['headers'] if 'headers' in args else ''
+        listGroups = args['listGroups'] if 'listGroups' in args else []        
+        patron = args['patron'] if 'patron' in args else ''
         patronNext = args['patronNext'] if 'patronNext' in args else ''
-        action = args['action'] if 'action' in args else 'findvideos'
-        addVideolibrary = args['addVideolibrary'] if 'addVideolibrary' in args else True
-        type_content_dict = args['type_content_dict'] if 'type_content_dict' in args else {}
+        patron_block = args['patron_block'] if 'patron_block' in args else ''
         type_action_dict = args['type_action_dict'] if 'type_action_dict' in args else {}
+        type_content_dict = args['type_content_dict'] if 'type_content_dict' in args else {}
 
         if not data:
             data = httptools.downloadpage(item.url, headers=headers, ignore_response_code=True).data.replace("'", '"')
@@ -165,7 +166,8 @@ def scrape(func):
 
             known_keys = ['url', 'title', 'title2', 'episode', 'thumb', 'quality', 'year', 'plot', 'duration', 'genere',
                           'rating', 'type', 'lang']  # by greko aggiunto episode
-
+            lang = '' # aggiunto per gestire i siti con pagine di serietv dove si hanno i video in ita e in subita
+            
             for match in matches:
                 if len(listGroups) > len(match):  # to fix a bug
                     match = list(match)
@@ -178,8 +180,8 @@ def scrape(func):
                         val = scrapertoolsV2.find_single_match(item.url, 'https?://[a-z0-9.-]+') + val
                     scraped[kk] = val
 
-                title = scrapertoolsV2.decodeHtmlentities(scraped["title"]).replace('"',
-                                                                                    "'").strip()  # fix by greko da " a '
+                title = scrapertoolsV2.htmlclean(scrapertoolsV2.decodeHtmlentities(scraped["title"])
+                                                 .replace('"',"'")).strip()  # fix by greko da " a '
                 plot = scrapertoolsV2.htmlclean(scrapertoolsV2.decodeHtmlentities(scraped["plot"]))
 
                 longtitle = typo(title, 'bold')
@@ -188,17 +190,21 @@ def scrape(func):
                     scraped['episode'] = re.sub(r'\s-\s|-|x|&#8211', 'x', scraped['episode'])
                     longtitle = typo(scraped['episode'] + ' - ', 'bold') + longtitle
                 if scraped['title2']:
-                    title2 = scrapertoolsV2.decodeHtmlentities(scraped["title2"]).replace('"', "'").strip()
+                    title2 = scrapertoolsV2.htmlclean(scrapertoolsV2.decodeHtmlentities(scraped["title2"]).replace('"', "'")).strip()
                     longtitle = longtitle + typo(title2, 'bold _ -- _')
-                if scraped["lang"]:
-                    if 'sub' in scraped["lang"].lower():
+                    
+                ##    Aggiunto/modificato per gestire i siti che hanno i video
+                ##    in ita e subita delle serie tv nella stessa pagina                             
+                if scraped['lang']:              
+                    if 'sub' in scraped['lang'].lower():
                         lang = 'Sub-ITA'
                     else:
-                        lang = 'ITA'
-                    longtitle += typo(lang, '_ [] color kod')
+                        lang = 'ITA'                      
+                if lang != '':
+                        longtitle += typo(lang, '_ [] color kod')
 
-                if item.infoLabels[
-                    "title"] or item.fulltitle:  # if title is set, probably this is a list of episodes or video sources
+                # if title is set, probably this is a list of episodes or video sources
+                if item.infoLabels["title"] or item.fulltitle:  
                     infolabels = item.infoLabels
                 else:
                     infolabels = {}
@@ -251,23 +257,30 @@ def scrape(func):
                         it = args['itemHook'](it)
                     itemlist.append(it)
             checkHost(item, itemlist)
-            if (item.contentType == "episode" and (action != "findvideos" and action != "play")) \
-                    or (item.contentType == "movie" and action != "play"):
+##            if (item.contentType == "episode" and (action != "findvideos" and action != "play")) \
+##                    or (item.contentType == "movie" and action != "play"):
+            if (item.contentType == "tvshow" and (action != "findvideos" and action != "play")) \
+                or (item.contentType == "episode" and action != "play") \
+                or (item.contentType == "movie" and action != "play") :            
                 tmdb.set_infoLabels_itemlist(itemlist, seekTmdb=True)
             else:
                 for it in itemlist:
                     it.infoLabels = item.infoLabels
-
+                
             if 'itemlistHook' in args:
                 itemlist = args['itemlistHook'](itemlist)
 
             if patronNext:
                 nextPage(itemlist, item, data, patronNext, 2)
 
+            if anime:
+                from specials import autorenumber
+                autorenumber.renumber(itemlist)
+                
             if addVideolibrary and (item.infoLabels["title"] or item.fulltitle):
                 item.fulltitle = item.infoLabels["title"]
                 videolibrary(itemlist, item)
-
+                
             if 'fullItemlistHook' in args:
                 itemlist = args['fullItemlistHook'](itemlist)
 
@@ -562,7 +575,8 @@ def nextPage(itemlist, item, data='', patron='', function_level=1, next_page='',
         log('NEXT= ', next_page)
         itemlist.append(
             Item(channel=item.channel,
-                 action=inspect.stack()[function_level][3],
+                 #action=inspect.stack()[function_level][3],
+                 action = item.action,
                  contentType=item.contentType,
                  title=typo(config.get_localized_string(30992), 'color kod bold'),
                  url=next_page,
